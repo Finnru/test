@@ -33,24 +33,39 @@ jobs:
 
       - name: Unpack with v2dat
         run: |
+          mkdir -p output_raw
+          # Распаковываем всё. Флаг -o указывает папку.
+          v2dat unpack geosite -o output_raw geosite.dat
+          
           mkdir -p data
-          # Команда unpack geosite извлекает ВСЕ категории в указанную папку
-          v2dat unpack geosite -o data geosite.dat
-          echo "✅ Extraction complete"
+          # Очищаем имена файлов от префикса "geosite_" и убираем расширение .txt
+          # Это сделает структуру 1:1 как в папке data оригинального репозитория
+          cd output_raw
+          for f in geosite_*.txt; do
+            newname=$(echo "$f" | sed 's/^geosite_//;s/\.txt$//')
+            # Переносим только если файл не пустой
+            if [ -s "$f" ]; then
+              cp "$f" "../data/$newname"
+            fi
+          done
+          cd ..
+          echo "✅ Extraction and renaming complete"
 
-      - name: Commit and Push
+      - name: Sync and Push
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # Решаем проблему "rejected (fetch first)" через rebase
+          # Синхронизация
           git pull origin main --rebase
           
+          # Очищаем старые пустые файлы из индекса, если они там были
+          git rm -rf data/ || true
           git add data/
-          # Проверяем на наличие изменений, чтобы не упасть на пустом коммите
+          
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Unpack geosite.dat using v2dat tool"
+            git commit -m "Unpack geosite.dat 1:1 - clean text"
             git push origin main
           fi
