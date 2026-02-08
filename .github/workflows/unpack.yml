@@ -1,4 +1,4 @@
-name: Unpack-GeoSite-1to1
+name: Unpack-GeoSite-From-Zip
 
 on:
   workflow_dispatch:
@@ -24,6 +24,7 @@ jobs:
           package main
 
           import (
+          	"archive/zip"
           	"encoding/binary"
           	"fmt"
           	"io"
@@ -51,56 +52,65 @@ jobs:
           }
 
           func main() {
-          	srcFile := "source/geosite.dat"
+          	zipPath := "source/geosite.zip"
           	outDir := "data"
 
-          	file, err := os.Open(srcFile)
-          	if err != nil { log.Fatalf("❌ Ошибка открытия: %v", err) }
-          	defer file.Close()
+          	// Открываем ZIP архив
+          	r, err := zip.OpenReader(zipPath)
+          	if err != nil { log.Fatalf("❌ Ошибка ZIP: %v", err) }
+          	defer r.Close()
+
+          	var datReader io.ReadCloser
+          	for _, f := range r.File {
+          		if strings.HasSuffix(f.Name, "geosite.dat") {
+          			datReader, err = f.Open()
+          			if err != nil { log.Fatal(err) }
+          			fmt.Printf("📦 Нашел %s внутри архива\n", f.Name)
+          			break
+          		}
+          	}
+
+          	if datReader == nil { log.Fatal("❌ geosite.dat не найден в архиве") }
+          	defer datReader.Close()
 
           	_ = os.RemoveAll(outDir)
           	_ = os.MkdirAll(outDir, 0755)
 
           	for {
-          		// Читаем внешнюю обертку GeoSiteList (Tag 1)
-          		header, err := readVarint(file)
+          		header, err := readVarint(datReader)
           		if err == io.EOF { break }
           		if err != nil { log.Fatal(err) }
 
-          		if header>>3 != 1 { continue } // Ждем только Field 1
+          		if header>>3 != 1 { continue }
 
-          		contentLen, _ := readVarint(file)
+          		contentLen, _ := readVarint(datReader)
           		content := make([]byte, contentLen)
-          		io.ReadFull(file, content)
+          		_, err = io.ReadFull(datReader, content)
+          		if err != nil { log.Fatal(err) }
 
           		var catName string
           		var lines []string
-          		
           		pos := uint64(0)
+
           		for pos < contentLen {
           			tag, n := binary.Uvarint(content[pos:])
           			pos += uint64(n)
           			valLen, n := binary.Uvarint(content[pos:])
           			pos += uint64(n)
-          			
           			val := content[pos : pos+valLen]
           			pos += valLen
 
-          			fieldNum := tag >> 3
-          			if fieldNum == 1 { // Имя категории
+          			if tag>>3 == 1 {
           				catName = string(val)
-          			} else if fieldNum == 2 { // Запись домена
-          				// Внутри Domain берем Field 2 (Value) - это и есть наша строка 1:1
+          			} else if tag>>3 == 2 {
           				dPos := uint64(0)
           				for dPos < uint64(len(val)) {
           					dTag, dn := binary.Uvarint(val[dPos:])
           					dPos += uint64(dn)
           					dValLen, dln := binary.Uvarint(val[dPos:])
           					dPos += uint64(dln)
-          					
           					dVal := val[dPos : dPos+dValLen]
           					dPos += dValLen
-
           					if dTag>>3 == 2 {
           						lines = append(lines, string(dVal))
           					}
@@ -109,9 +119,7 @@ jobs:
           		}
 
           		if catName != "" {
-          			fmt.Printf("📂 Извлечено: %s\n", catName)
-          			// Сохраняем имя файла в нижнем регистре для удобства, 
-          			// но внутри данных будет то, что было в DAT
+          			fmt.Printf("📂 Извлечено: %s (%d строк)\n", catName, len(lines))
           			outPath := filepath.Join(outDir, strings.ToLower(catName))
           			f, _ := os.Create(outPath)
           			for _, line := range lines {
@@ -131,5 +139,5 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add data/
-          git commit -m "Unpack geosite.dat 1:1" || exit 0
+          git commit -m "Unpack from geosite.zip 1:1" || exit 0
           git push
