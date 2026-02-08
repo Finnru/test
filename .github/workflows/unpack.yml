@@ -1,7 +1,7 @@
-name: Unpack-GeoSite-Official-V2Dat
+name: Unpack-GeoSite-Official-Final
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Кнопка ручного запуска в Actions
 
 permissions:
   contents: write
@@ -13,7 +13,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Важно для подтягивания истории перед пушем
+          fetch-depth: 0 # Важно для работы Git Pull
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -23,56 +23,47 @@ jobs:
       - name: Install v2dat
         run: go install github.com/urlesistiana/v2dat@latest
 
-      - name: Extract ZIP
+      - name: Sync, Unpack and Push
         run: |
-          mkdir -p temp_extracted
-          unzip source/geosite.zip -d temp_extracted/
-          # Ищем файл в распакованном архиве и кладем в корень
-          find temp_extracted/ -name "geosite.dat" -exec cp {} ./geosite.dat \;
-          echo "✅ geosite.dat ready"
+          # 1. Настройка Git
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
 
-      - name: Unpack with v2dat
-        run: |
-          # 1. Очищаем папку данных, чтобы избежать конфликтов
-          rm -rf data
-          mkdir -p output_raw
-          
-          # 2. Распаковываем. Флаг "unpack geosite" в v2dat извлекает все категории.
+          # 2. Очистка и Pull (чтобы не было ошибки rejected)
+          git clean -fd data/ || true
+          git pull origin main --rebase
+
+          # 3. Работа с архивом
+          mkdir -p temp_extracted
+          unzip -o source/geosite.zip -d temp_extracted/
+          # Ищем geosite.dat внутри (может быть в подпапках)
+          find temp_extracted/ -name "geosite.dat" -exec cp {} ./geosite.dat \;
+          echo "✅ geosite.dat готов к обработке"
+
+          # 4. Распаковка через v2dat в промежуточную папку
+          rm -rf output_raw && mkdir output_raw
           v2dat unpack geosite -o output_raw geosite.dat
-          
-          # 3. Переносим файлы, убирая префиксы и проверяя контент
-          mkdir -p data
+
+          # 5. Очистка имен и фильтрация пустых файлов
+          rm -rf data && mkdir -p data
           cd output_raw
           for f in geosite_*.txt; do
             [ -e "$f" ] || continue
-            # Убираем префикс geosite_ и расширение .txt
-            newname=$(echo "$f" | sed 's/^geosite_//;s/\.txt$//')
+            # Превращаем 'geosite_google.txt' в 'google'
+            newname=$(basename "$f" | sed 's/^geosite_//;s/\.txt$//')
             
-            # Копируем только если файл реально содержит данные (размер > 0)
+            # Копируем только если файл не пустой
             if [ -s "$f" ]; then
               cp "$f" "../data/$newname"
             fi
           done
           cd ..
-          echo "✅ Распаковка и переименование завершены"
 
-      - name: Sync and Push
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          
-          # Удаляем локальные копии файлов, которые мешают git pull
-          git clean -fd data/
-          
-          # Подтягиваем изменения из удаленного репозитория
-          git pull origin main --rebase
-          
-          # Добавляем обновленные данные
+          # 6. Коммит и отправка в репозиторий
           git add data/
-          
           if git diff --staged --quiet; then
             echo "Нет изменений для коммита"
           else
-            git commit -m "Unpack geosite.dat 1:1 - clean text"
+            git commit -m "Unpack geosite 1:1 - clean names"
             git push origin main
           fi
