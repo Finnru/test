@@ -1,6 +1,0 @@
-full:servd-anthropic-website.b-cdn.net
-anthropic.com
-claude.ai
-claude.com
-claudeusercontent.com
-claudemcpclient.com
