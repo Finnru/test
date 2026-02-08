@@ -70,75 +70,68 @@ jobs:
           	_ = os.MkdirAll(outDir, 0755)
 
           	for {
-          		// Читаем внешнюю обертку GeoSite (Field 1, WireType 2)
           		header, err := readVarint(file)
           		if err == io.EOF { break }
-          		if err != nil { log.Fatal(err) }
+          		if err != nil { break }
 
           		if header>>3 != 1 {
-          			continue 
+          			if header&0x7 == 2 {
+          				l, _ := readVarint(file)
+          				io.CopyN(io.Discard, file, int64(l))
+          			}
+          			continue
           		}
 
           		contentLen, _ := readVarint(file)
           		content := make([]byte, contentLen)
-          		_, err = io.ReadFull(file, content)
-          		if err != nil {
-          			fmt.Printf("⚠️  End of file or partial block reached\n")
-          			break
-          		}
+          		if _, err := io.ReadFull(file, content); err != nil { break }
 
           		var catName string
           		var lines []string
           		
           		offset := 0
           		for offset < len(content) {
-          			// Безопасное чтение тега
           			tag, n := binary.Uvarint(content[offset:])
-          			if n <= 0 { break }
           			offset += n
-
-          			// Безопасное чтение длины
           			valLen, n := binary.Uvarint(content[offset:])
-          			if n <= 0 { break }
           			offset += n
           			
           			end := offset + int(valLen)
-          			// ПРОВЕРКА ГРАНИЦ: Если данных меньше, чем обещала длина - выходим из категории
-          			if end > len(content) {
-          				fmt.Printf("❌ Data mismatch in category %s: promised %d, have %d\n", catName, valLen, len(content)-offset)
-          				break 
-          			}
-
+          			if end > len(content) { break }
           			val := content[offset:end]
           			offset = end
 
-          			if tag>>3 == 1 {
+          			fieldNum := tag >> 3
+          			if fieldNum == 1 {
           				catName = string(val)
-          			} else if tag>>3 == 2 {
-          				// Парсим вложенный Domain (1:1)
-          				dOff := 0
-          				for dOff < len(val) {
-          					dTag, dn := binary.Uvarint(val[dOff:])
-          					if dn <= 0 { break }
-          					dOff += dn
-
-          					dValLen, dln := binary.Uvarint(val[dOff:])
-          					if dln <= 0 { break }
-          					dOff += dln
-
-          					dEnd := dOff + int(dValLen)
-          					if dEnd > len(val) { break }
-          					
-          					if dTag>>3 == 2 { // Field 2: Value
-          						lines = append(lines, string(val[dOff:dEnd]))
+          			} else if fieldNum == 2 {
+          				// Пытаемся распарсить как строку (1:1)
+          				// Если внутри строки есть префикс (domain:, full:), это точно она
+          				// Если это вложенный Protobuf, dTag будет мелким числом
+          				if len(val) > 2 {
+          					dTag, dn := binary.Uvarint(val)
+          					// Если первый байт похож на тег Protobuf (Field 1 или 2), 
+          					// значит это вложенное сообщение
+          					if dn > 0 && (dTag>>3 == 1 || dTag>>3 == 2) && int(dTag&0x7) == 2 {
+          						// Парсим вложенный Domain
+          						dOff := dn
+          						dLen, dln := binary.Uvarint(val[dOff:])
+          						dOff += dln
+          						if dOff+int(dLen) <= len(val) {
+          							lines = append(lines, string(val[dOff:dOff+int(dLen)]))
+          						}
+          					} else {
+          						// Иначе считаем, что это просто строка 1:1
+          						lines = append(lines, string(val))
           					}
-          					dOff = dEnd
+          				} else {
+          					lines = append(lines, string(val))
           				}
           			}
           		}
 
           		if catName != "" {
-          			fmt.Printf("📂 Unpacked: %-15s | Lines: %d\n", catName, len(lines))
+          			fmt.Printf("📂 Unpacking: %-25s | Lines: %d\n", catName, len(lines))
           			outPath := filepath.Join(outDir, strings.ToLower(catName))
           			f, _ := os.Create(outPath)
           			for _, line := range lines {
