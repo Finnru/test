@@ -1,4 +1,4 @@
-name: Unpack-GeoSite-From-Zip
+name: Unpack-GeoSite-Safe
 
 on:
   workflow_dispatch:
@@ -18,13 +18,20 @@ jobs:
         with:
           go-version: '1.24'
 
+      - name: Extract ZIP
+        run: |
+          mkdir -p temp_extracted
+          unzip source/geosite.zip -d temp_extracted/
+          # Ищем, где именно лежит файл (может быть в подпапках)
+          find temp_extracted/ -name "geosite.dat" -exec cp {} ./geosite.dat \;
+          echo "✅ geosite.dat ready for processing"
+
       - name: Create Unpacker Script
         run: |
           cat <<EOF > unpacker.go
           package main
 
           import (
-          	"archive/zip"
           	"encoding/binary"
           	"fmt"
           	"io"
@@ -52,93 +59,86 @@ jobs:
           }
 
           func main() {
-          	zipPath := "source/geosite.zip"
+          	srcFile := "geosite.dat"
           	outDir := "data"
 
-          	r, err := zip.OpenReader(zipPath)
-          	if err != nil { log.Fatalf("❌ ZIP Error: %v", err) }
-          	defer r.Close()
-
-          	var datReader io.ReadCloser
-          	for _, f := range r.File {
-          		if strings.HasSuffix(strings.ToLower(f.Name), "geosite.dat") {
-          			datReader, err = f.Open()
-          			if err != nil { log.Fatal(err) }
-          			break
-          		}
-          	}
-
-          	if datReader == nil { log.Fatal("❌ geosite.dat not found in zip") }
-          	defer datReader.Close()
+          	file, err := os.Open(srcFile)
+          	if err != nil { log.Fatalf("❌ Error: %v", err) }
+          	defer file.Close()
 
           	_ = os.RemoveAll(outDir)
           	_ = os.MkdirAll(outDir, 0755)
 
           	for {
-          		// Читаем внешнюю обертку (Tag 1, Type 2)
-          		header, err := readVarint(datReader)
+          		// Читаем внешнюю обертку GeoSite (Field 1, WireType 2)
+          		header, err := readVarint(file)
           		if err == io.EOF { break }
           		if err != nil { log.Fatal(err) }
 
           		if header>>3 != 1 {
-          			// Если это не Field 1, читаем длину и пропускаем данные
-          			if header&0x7 == 2 {
-          				skipLen, _ := readVarint(datReader)
-          				io.CopyN(io.Discard, datReader, int64(skipLen))
-          			}
-          			continue
+          			continue 
           		}
 
-          		contentLen, _ := readVarint(datReader)
+          		contentLen, _ := readVarint(file)
           		content := make([]byte, contentLen)
-          		_, err = io.ReadFull(datReader, content)
-          		if err != nil { log.Fatal(err) }
+          		_, err = io.ReadFull(file, content)
+          		if err != nil {
+          			fmt.Printf("⚠️  End of file or partial block reached\n")
+          			break
+          		}
 
           		var catName string
           		var lines []string
           		
           		offset := 0
           		for offset < len(content) {
+          			// Безопасное чтение тега
           			tag, n := binary.Uvarint(content[offset:])
+          			if n <= 0 { break }
           			offset += n
+
+          			// Безопасное чтение длины
           			valLen, n := binary.Uvarint(content[offset:])
+          			if n <= 0 { break }
           			offset += n
           			
-          			// Защита от выхода за границы
           			end := offset + int(valLen)
+          			// ПРОВЕРКА ГРАНИЦ: Если данных меньше, чем обещала длина - выходим из категории
           			if end > len(content) {
-          				fmt.Printf("⚠️  Warning: Corrupted block in category %s, skipping\n", catName)
-          				break
+          				fmt.Printf("❌ Data mismatch in category %s: promised %d, have %d\n", catName, valLen, len(content)-offset)
+          				break 
           			}
+
           			val := content[offset:end]
           			offset = end
 
-          			fieldNum := tag >> 3
-          			if fieldNum == 1 { // Имя категории
+          			if tag>>3 == 1 {
           				catName = string(val)
-          			} else if fieldNum == 2 { // Domain Message
-          				// Парсим внутренности Domain (Field 2)
+          			} else if tag>>3 == 2 {
+          				// Парсим вложенный Domain (1:1)
           				dOff := 0
           				for dOff < len(val) {
           					dTag, dn := binary.Uvarint(val[dOff:])
+          					if dn <= 0 { break }
           					dOff += dn
+
           					dValLen, dln := binary.Uvarint(val[dOff:])
+          					if dln <= 0 { break }
           					dOff += dln
-          					
+
           					dEnd := dOff + int(dValLen)
           					if dEnd > len(val) { break }
-          					dVal := val[dOff:dEnd]
-          					dOff = dEnd
-
-          					if dTag>>3 == 2 { // Domain.value
-          						lines = append(lines, string(dVal))
+          					
+          					if dTag>>3 == 2 { // Field 2: Value
+          						lines = append(lines, string(val[dOff:dEnd]))
           					}
+          					dOff = dEnd
           				}
           			}
           		}
 
           		if catName != "" {
-          			fmt.Printf("📂 Extracting: %-20s | Domains: %d\n", catName, len(lines))
+          			fmt.Printf("📂 Unpacked: %-15s | Lines: %d\n", catName, len(lines))
           			outPath := filepath.Join(outDir, strings.ToLower(catName))
           			f, _ := os.Create(outPath)
           			for _, line := range lines {
@@ -147,17 +147,16 @@ jobs:
           			f.Close()
           		}
           	}
-          	fmt.Println("✅ Unpack finished successfully.")
           }
           EOF
 
       - name: Run Unpacker
         run: go run unpacker.go
 
-      - name: Push Results
+      - name: Commit Data
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add data/
-          git commit -m "Unpack from geosite.zip 1:1" || exit 0
+          git commit -m "Unpack geosite.dat 1:1" || exit 0
           git push
