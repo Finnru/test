@@ -1,4 +1,4 @@
-name: Unpack-GeoSite-Official
+name: Unpack-GeoSite-Official-V2Dat
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Нужно для корректного пуша в main
+          fetch-depth: 0 # Важно для подтягивания истории перед пушем
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -23,36 +23,34 @@ jobs:
       - name: Install v2dat
         run: go install github.com/urlesistiana/v2dat@latest
 
-      - name: Prepare Files
+      - name: Extract ZIP
         run: |
-          mkdir -p source_data
-          unzip source/geosite.zip -d source_data/
-          # Находим распакованный файл
-          DAT_PATH=$(find source_data -name "geosite.dat" | head -n 1)
-          cp "$DAT_PATH" ./geosite.dat
-          echo "✅ geosite.dat is ready"
+          mkdir -p temp_extracted
+          unzip source/geosite.zip -d temp_extracted/
+          # Ищем файл в распакованном архиве и кладем в корень
+          find temp_extracted/ -name "geosite.dat" -exec cp {} ./geosite.dat \;
+          echo "✅ geosite.dat ready"
 
       - name: Unpack with v2dat
         run: |
           mkdir -p data
-          # v2dat unpack geosite -f <имя_метки> <путь_к_dat>
-          # Чтобы вытащить ВООБЩЕ ВСЕ категории сразу, используем цикл по списку меток
-          v2dat unpack geosite geosite.dat -o ./data/
+          # Команда unpack geosite извлекает ВСЕ категории в указанную папку
+          v2dat unpack geosite -o data geosite.dat
           echo "✅ Extraction complete"
 
-      - name: Sync and Push
+      - name: Commit and Push
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # Решаем проблему "rejected (fetch first)"
+          # Решаем проблему "rejected (fetch first)" через rebase
           git pull origin main --rebase
           
           git add data/
-          # Проверяем, есть ли изменения перед коммитом
+          # Проверяем на наличие изменений, чтобы не упасть на пустом коммите
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Unpack geosite.dat using v2dat (1:1)"
+            git commit -m "Unpack geosite.dat using v2dat tool"
             git push origin main
           fi
