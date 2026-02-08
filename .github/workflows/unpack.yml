@@ -1,4 +1,4 @@
-name: Unpack-GeoSite-Safe
+name: Unpack-GeoSite-Official
 
 on:
   workflow_dispatch:
@@ -12,142 +12,47 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Нужно для корректного пуша в main
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
 
-      - name: Extract ZIP
+      - name: Install v2dat
+        run: go install github.com/urlesistiana/v2dat@latest
+
+      - name: Prepare Files
         run: |
-          mkdir -p temp_extracted
-          unzip source/geosite.zip -d temp_extracted/
-          # Ищем, где именно лежит файл (может быть в подпапках)
-          find temp_extracted/ -name "geosite.dat" -exec cp {} ./geosite.dat \;
-          echo "✅ geosite.dat ready for processing"
+          mkdir -p source_data
+          unzip source/geosite.zip -d source_data/
+          # Находим распакованный файл
+          DAT_PATH=$(find source_data -name "geosite.dat" | head -n 1)
+          cp "$DAT_PATH" ./geosite.dat
+          echo "✅ geosite.dat is ready"
 
-      - name: Create Unpacker Script
+      - name: Unpack with v2dat
         run: |
-          cat <<EOF > unpacker.go
-          package main
+          mkdir -p data
+          # v2dat unpack geosite -f <имя_метки> <путь_к_dat>
+          # Чтобы вытащить ВООБЩЕ ВСЕ категории сразу, используем цикл по списку меток
+          v2dat unpack geosite geosite.dat -o ./data/
+          echo "✅ Extraction complete"
 
-          import (
-          	"encoding/binary"
-          	"fmt"
-          	"io"
-          	"log"
-          	"os"
-          	"path/filepath"
-          	"strings"
-          )
-
-          func readVarint(r io.Reader) (uint64, error) {
-          	var v uint64
-          	var shift uint
-          	for {
-          		var b [1]byte
-          		if _, err := r.Read(b[:]); err != nil {
-          			return 0, err
-          		}
-          		v |= uint64(b[0]&0x7F) << shift
-          		if b[0]&0x80 == 0 {
-          			break
-          		}
-          		shift += 7
-          	}
-          	return v, nil
-          }
-
-          func main() {
-          	srcFile := "geosite.dat"
-          	outDir := "data"
-
-          	file, err := os.Open(srcFile)
-          	if err != nil { log.Fatalf("❌ Error: %v", err) }
-          	defer file.Close()
-
-          	_ = os.RemoveAll(outDir)
-          	_ = os.MkdirAll(outDir, 0755)
-
-          	for {
-          		header, err := readVarint(file)
-          		if err == io.EOF { break }
-          		if err != nil { break }
-
-          		// Пропускаем все, что не Field 1 (Category)
-          		if header>>3 != 1 {
-          			if header&0x7 == 2 {
-          				l, _ := readVarint(file)
-          				io.CopyN(io.Discard, file, int64(l))
-          			}
-          			continue
-          		}
-
-          		contentLen, _ := readVarint(file)
-          		content := make([]byte, contentLen)
-          		if _, err := io.ReadFull(file, content); err != nil { break }
-
-          		var catName string
-          		var lines []string
-          		
-          		offset := 0
-          		for offset < len(content) {
-          			tag, n := binary.Uvarint(content[offset:])
-          			offset += n
-          			valLen, n := binary.Uvarint(content[offset:])
-          			offset += n
-          			
-          			end := offset + int(valLen)
-          			if end > len(content) { break }
-          			val := content[offset:end]
-          			offset = end
-
-          			fieldNum := tag >> 3
-          			if fieldNum == 1 {
-          				catName = string(val)
-          			} else if fieldNum == 2 {
-          				// Заходим внутрь домена
-          				dOff := 0
-          				for dOff < len(val) {
-          					dTag, dn := binary.Uvarint(val[dOff:])
-          					dOff += dn
-          					dLen, dln := binary.Uvarint(val[dOff:])
-          					dOff += dln
-          					
-          					dEnd := dOff + int(dLen)
-          					if dEnd > len(val) { break }
-          					
-          					data := val[dOff:dEnd]
-          					// ВАЖНО: берем любое поле, которое содержит строку (обычно 2, но бывает и 1)
-          					// Игнорируем только совсем короткие бинарные данные (типа типа домена)
-          					if len(data) > 1 {
-          						lines = append(lines, string(data))
-          					}
-          					dOff = dEnd
-          				}
-          			}
-          		}
-
-          		if catName != "" && len(lines) > 0 {
-          			fmt.Printf("📂 Unpacking: %-25s | Lines: %d\n", catName, len(lines))
-          			outPath := filepath.Join(outDir, strings.ToLower(catName))
-          			f, _ := os.Create(outPath)
-          			for _, line := range lines {
-          				f.WriteString(line + "\n")
-          			}
-          			f.Close()
-          		}
-          	}
-          }
-          EOF
-
-      - name: Run Unpacker
-        run: go run unpacker.go
-
-      - name: Commit Data
+      - name: Sync and Push
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
+          
+          # Решаем проблему "rejected (fetch first)"
+          git pull origin main --rebase
+          
           git add data/
-          git commit -m "Unpack geosite.dat 1:1" || exit 0
-          git push
+          # Проверяем, есть ли изменения перед коммитом
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Unpack geosite.dat using v2dat (1:1)"
+            git push origin main
+          fi
