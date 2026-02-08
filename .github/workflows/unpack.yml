@@ -33,38 +33,45 @@ jobs:
 
       - name: Unpack with v2dat
         run: |
+          # 1. Очищаем папку данных, чтобы избежать конфликтов
+          rm -rf data
           mkdir -p output_raw
-          # Распаковываем всё. Флаг -o указывает папку.
+          
+          # 2. Распаковываем. Флаг "unpack geosite" в v2dat извлекает все категории.
           v2dat unpack geosite -o output_raw geosite.dat
           
+          # 3. Переносим файлы, убирая префиксы и проверяя контент
           mkdir -p data
-          # Очищаем имена файлов от префикса "geosite_" и убираем расширение .txt
-          # Это сделает структуру 1:1 как в папке data оригинального репозитория
           cd output_raw
           for f in geosite_*.txt; do
+            [ -e "$f" ] || continue
+            # Убираем префикс geosite_ и расширение .txt
             newname=$(echo "$f" | sed 's/^geosite_//;s/\.txt$//')
-            # Переносим только если файл не пустой
+            
+            # Копируем только если файл реально содержит данные (размер > 0)
             if [ -s "$f" ]; then
               cp "$f" "../data/$newname"
             fi
           done
           cd ..
-          echo "✅ Extraction and renaming complete"
+          echo "✅ Распаковка и переименование завершены"
 
       - name: Sync and Push
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # Синхронизация
+          # Удаляем локальные копии файлов, которые мешают git pull
+          git clean -fd data/
+          
+          # Подтягиваем изменения из удаленного репозитория
           git pull origin main --rebase
           
-          # Очищаем старые пустые файлы из индекса, если они там были
-          git rm -rf data/ || true
+          # Добавляем обновленные данные
           git add data/
           
           if git diff --staged --quiet; then
-            echo "No changes to commit"
+            echo "Нет изменений для коммита"
           else
             git commit -m "Unpack geosite.dat 1:1 - clean text"
             git push origin main
