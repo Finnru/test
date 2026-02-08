@@ -1,24 +1,0 @@
-gog.com
-gog-statics.com
-gog.qtlglb.com
-cn
-gogalaxy.gog-statics.com
-cn
-menu-static.gog-statics.com
-cn
-productcard.gog-statics.com
-cn
-static-login.gog-statics.com
-cn
-www4-static.gog-statics.com
-cn
-"^cdn-akamai-.+\.gog-services\.com$
-cn
-^gog-cdn-.+\.footprint\.net$
-cn
- ^images(-\d)?\.gog-statics\.com$
-cn
-gog-cdn-fastly.gog.com
-cn
-gog-cdn.akamaized.net
-cn
