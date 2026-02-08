@@ -70,6 +70,7 @@ jobs:
           	_ = os.MkdirAll(outDir, 0755)
 
           	for {
+          		// Читаем категорию (Field 1)
           		header, err := readVarint(file)
           		if err == io.EOF { break }
           		if err != nil { break }
@@ -102,36 +103,36 @@ jobs:
           			offset = end
 
           			fieldNum := tag >> 3
-          			if fieldNum == 1 {
+          			if fieldNum == 1 { // Имя категории
           				catName = string(val)
-          			} else if fieldNum == 2 {
-          				// Пытаемся распарсить как строку (1:1)
-          				// Если внутри строки есть префикс (domain:, full:), это точно она
-          				// Если это вложенный Protobuf, dTag будет мелким числом
-          				if len(val) > 2 {
-          					dTag, dn := binary.Uvarint(val)
-          					// Если первый байт похож на тег Protobuf (Field 1 или 2), 
-          					// значит это вложенное сообщение
-          					if dn > 0 && (dTag>>3 == 1 || dTag>>3 == 2) && int(dTag&0x7) == 2 {
-          						// Парсим вложенный Domain
-          						dOff := dn
-          						dLen, dln := binary.Uvarint(val[dOff:])
-          						dOff += dln
-          						if dOff+int(dLen) <= len(val) {
-          							lines = append(lines, string(val[dOff:dOff+int(dLen)]))
-          						}
-          					} else {
-          						// Иначе считаем, что это просто строка 1:1
-          						lines = append(lines, string(val))
+          			} else if fieldNum == 2 { // Domain Message (Вложенный объект)
+          				// Ищем внутри Domain Field 2 (строковое значение)
+          				dOff := 0
+          				for dOff < len(val) {
+          					dTag, dn := binary.Uvarint(val[dOff:])
+          					if dn <= 0 { break }
+          					dOff += dn
+          					
+          					dLen, dln := binary.Uvarint(val[dOff:])
+          					if dln <= 0 { break }
+          					dOff += dln
+          					
+          					dEnd := dOff + int(dLen)
+          					if dEnd > len(val) { break }
+
+          					// Если это поле 2 (строка) или поле 1 (тип), 
+          					// нам нужно именно значение строки.
+          					// В стандартном geosite.dat это Field 2.
+          					if dTag>>3 == 2 {
+          						lines = append(lines, string(val[dOff:dEnd]))
           					}
-          				} else {
-          					lines = append(lines, string(val))
+          					dOff = dEnd
           				}
           			}
           		}
 
           		if catName != "" {
-          			fmt.Printf("📂 Unpacking: %-25s | Lines: %d\n", catName, len(lines))
+          			fmt.Printf("📂 Unpacked: %-25s | Lines: %d\n", catName, len(lines))
           			outPath := filepath.Join(outDir, strings.ToLower(catName))
           			f, _ := os.Create(outPath)
           			for _, line := range lines {
