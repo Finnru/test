@@ -55,9 +55,8 @@ jobs:
           	zipPath := "source/geosite.zip"
           	outDir := "data"
 
-          	// Открываем ZIP архив
           	r, err := zip.OpenReader(zipPath)
-          	if err != nil { log.Fatalf("❌ Ошибка ZIP: %v", err) }
+          	if err != nil { log.Fatalf("❌ ZIP Error: %v", err) }
           	defer r.Close()
 
           	var datReader io.ReadCloser
@@ -65,18 +64,18 @@ jobs:
           		if strings.HasSuffix(f.Name, "geosite.dat") {
           			datReader, err = f.Open()
           			if err != nil { log.Fatal(err) }
-          			fmt.Printf("📦 Нашел %s внутри архива\n", f.Name)
           			break
           		}
           	}
 
-          	if datReader == nil { log.Fatal("❌ geosite.dat не найден в архиве") }
+          	if datReader == nil { log.Fatal("❌ geosite.dat not found in zip") }
           	defer datReader.Close()
 
           	_ = os.RemoveAll(outDir)
           	_ = os.MkdirAll(outDir, 0755)
 
           	for {
+          		// Читаем внешнюю обертку (Tag 1)
           		header, err := readVarint(datReader)
           		if err == io.EOF { break }
           		if err != nil { log.Fatal(err) }
@@ -90,27 +89,34 @@ jobs:
 
           		var catName string
           		var lines []string
-          		pos := uint64(0)
-
-          		for pos < contentLen {
-          			tag, n := binary.Uvarint(content[pos:])
-          			pos += uint64(n)
-          			valLen, n := binary.Uvarint(content[pos:])
-          			pos += uint64(n)
-          			val := content[pos : pos+valLen]
-          			pos += valLen
+          		
+          		// Безопасный парсинг буфера content
+          		offset := 0
+          		for offset < len(content) {
+          			tag, n := binary.Uvarint(content[offset:])
+          			offset += n
+          			valLen, n := binary.Uvarint(content[offset:])
+          			offset += n
+          			
+          			if offset+int(valLen) > len(content) { break }
+          			val := content[offset : offset+int(valLen)]
+          			offset += int(valLen)
 
           			if tag>>3 == 1 {
           				catName = string(val)
           			} else if tag>>3 == 2 {
-          				dPos := uint64(0)
-          				for dPos < uint64(len(val)) {
-          					dTag, dn := binary.Uvarint(val[dPos:])
-          					dPos += uint64(dn)
-          					dValLen, dln := binary.Uvarint(val[dPos:])
-          					dPos += uint64(dln)
-          					dVal := val[dPos : dPos+dValLen]
-          					dPos += dValLen
+          				// Парсим вложенный Domain
+          				dOff := 0
+          				for dOff < len(val) {
+          					dTag, dn := binary.Uvarint(val[dOff:])
+          					dOff += dn
+          					dValLen, dln := binary.Uvarint(val[dOff:])
+          					dOff += dln
+          					
+          					if dOff+int(dValLen) > len(val) { break }
+          					dVal := val[dOff : dOff+int(dValLen)]
+          					dOff += int(dValLen)
+
           					if dTag>>3 == 2 {
           						lines = append(lines, string(dVal))
           					}
