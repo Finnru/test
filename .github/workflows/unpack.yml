@@ -1,0 +1,135 @@
+name: Unpack-GeoSite-1to1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Create Unpacker Script
+        run: |
+          cat <<EOF > unpacker.go
+          package main
+
+          import (
+          	"encoding/binary"
+          	"fmt"
+          	"io"
+          	"log"
+          	"os"
+          	"path/filepath"
+          	"strings"
+          )
+
+          func readVarint(r io.Reader) (uint64, error) {
+          	var v uint64
+          	var shift uint
+          	for {
+          		var b [1]byte
+          		if _, err := r.Read(b[:]); err != nil {
+          			return 0, err
+          		}
+          		v |= uint64(b[0]&0x7F) << shift
+          		if b[0]&0x80 == 0 {
+          			break
+          		}
+          		shift += 7
+          	}
+          	return v, nil
+          }
+
+          func main() {
+          	srcFile := "source/geosite.dat"
+          	outDir := "data"
+
+          	file, err := os.Open(srcFile)
+          	if err != nil { log.Fatalf("❌ Ошибка открытия: %v", err) }
+          	defer file.Close()
+
+          	_ = os.RemoveAll(outDir)
+          	_ = os.MkdirAll(outDir, 0755)
+
+          	for {
+          		// Читаем внешнюю обертку GeoSiteList (Tag 1)
+          		header, err := readVarint(file)
+          		if err == io.EOF { break }
+          		if err != nil { log.Fatal(err) }
+
+          		if header>>3 != 1 { continue } // Ждем только Field 1
+
+          		contentLen, _ := readVarint(file)
+          		content := make([]byte, contentLen)
+          		io.ReadFull(file, content)
+
+          		var catName string
+          		var lines []string
+          		
+          		pos := uint64(0)
+          		for pos < contentLen {
+          			tag, n := binary.Uvarint(content[pos:])
+          			pos += uint64(n)
+          			valLen, n := binary.Uvarint(content[pos:])
+          			pos += uint64(n)
+          			
+          			val := content[pos : pos+valLen]
+          			pos += valLen
+
+          			fieldNum := tag >> 3
+          			if fieldNum == 1 { // Имя категории
+          				catName = string(val)
+          			} else if fieldNum == 2 { // Запись домена
+          				// Внутри Domain берем Field 2 (Value) - это и есть наша строка 1:1
+          				dPos := uint64(0)
+          				for dPos < uint64(len(val)) {
+          					dTag, dn := binary.Uvarint(val[dPos:])
+          					dPos += uint64(dn)
+          					dValLen, dln := binary.Uvarint(val[dPos:])
+          					dPos += uint64(dln)
+          					
+          					dVal := val[dPos : dPos+dValLen]
+          					dPos += dValLen
+
+          					if dTag>>3 == 2 {
+          						lines = append(lines, string(dVal))
+          					}
+          				}
+          			}
+          		}
+
+          		if catName != "" {
+          			fmt.Printf("📂 Извлечено: %s\n", catName)
+          			// Сохраняем имя файла в нижнем регистре для удобства, 
+          			// но внутри данных будет то, что было в DAT
+          			outPath := filepath.Join(outDir, strings.ToLower(catName))
+          			f, _ := os.Create(outPath)
+          			for _, line := range lines {
+          				f.WriteString(line + "\n")
+          			}
+          			f.Close()
+          		}
+          	}
+          }
+          EOF
+
+      - name: Run Unpacker
+        run: go run unpacker.go
+
+      - name: Push Results
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add data/
+          git commit -m "Unpack geosite.dat 1:1" || exit 0
+          git push
