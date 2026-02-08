@@ -70,11 +70,11 @@ jobs:
           	_ = os.MkdirAll(outDir, 0755)
 
           	for {
-          		// Читаем категорию (Field 1)
           		header, err := readVarint(file)
           		if err == io.EOF { break }
           		if err != nil { break }
 
+          		// Пропускаем все, что не Field 1 (Category)
           		if header>>3 != 1 {
           			if header&0x7 == 2 {
           				l, _ := readVarint(file)
@@ -103,36 +103,33 @@ jobs:
           			offset = end
 
           			fieldNum := tag >> 3
-          			if fieldNum == 1 { // Имя категории
+          			if fieldNum == 1 {
           				catName = string(val)
-          			} else if fieldNum == 2 { // Domain Message (Вложенный объект)
-          				// Ищем внутри Domain Field 2 (строковое значение)
+          			} else if fieldNum == 2 {
+          				// Заходим внутрь домена
           				dOff := 0
           				for dOff < len(val) {
           					dTag, dn := binary.Uvarint(val[dOff:])
-          					if dn <= 0 { break }
           					dOff += dn
-          					
           					dLen, dln := binary.Uvarint(val[dOff:])
-          					if dln <= 0 { break }
           					dOff += dln
           					
           					dEnd := dOff + int(dLen)
           					if dEnd > len(val) { break }
-
-          					// Если это поле 2 (строка) или поле 1 (тип), 
-          					// нам нужно именно значение строки.
-          					// В стандартном geosite.dat это Field 2.
-          					if dTag>>3 == 2 {
-          						lines = append(lines, string(val[dOff:dEnd]))
+          					
+          					data := val[dOff:dEnd]
+          					// ВАЖНО: берем любое поле, которое содержит строку (обычно 2, но бывает и 1)
+          					// Игнорируем только совсем короткие бинарные данные (типа типа домена)
+          					if len(data) > 1 {
+          						lines = append(lines, string(data))
           					}
           					dOff = dEnd
           				}
           			}
           		}
 
-          		if catName != "" {
-          			fmt.Printf("📂 Unpacked: %-25s | Lines: %d\n", catName, len(lines))
+          		if catName != "" && len(lines) > 0 {
+          			fmt.Printf("📂 Unpacking: %-25s | Lines: %d\n", catName, len(lines))
           			outPath := filepath.Join(outDir, strings.ToLower(catName))
           			f, _ := os.Create(outPath)
           			for _, line := range lines {
