@@ -29,53 +29,46 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
-          # 2. Обновление ветки
+          # 2. Обновление
           git pull origin main --rebase
 
-          # 3. Определяем абсолютный путь к корню репозитория
+          # 3. Пути
           REPO_ROOT=$(pwd)
-          echo "Рабочая директория: $REPO_ROOT"
-
-          # 4. Проверка исходного файла (test/source/_geosite.dat)
-          if [ ! -f "$REPO_ROOT/source/_geosite.dat" ]; then
-            echo "❌ Ошибка: Файл source/_geosite.dat не найден!"
-            ls -R # Выведем структуру для отладки, если упадет
-            exit 1
-          fi
-
-          # 5. Подготовка папок в корне репозитория
-          rm -rf "$REPO_ROOT/output_raw"
-          mkdir -p "$REPO_ROOT/output_raw"
           
-          # Удаляем старую папку data и очищаем ее в Git
-          if [ -d "$REPO_ROOT/data" ]; then
-            git rm -rf "$REPO_ROOT/data" || rm -rf "$REPO_ROOT/data"
+          # 4. Очистка и создание папки data в корне репозитория
+          # Сначала удаляем через git, чтобы он заметил изменения
+          if [ -d "data" ]; then
+            git rm -rf data/ || rm -rf data/
           fi
-          mkdir -p "$REPO_ROOT/data"
+          mkdir -p data
 
-          # 6. Распаковка
+          # 5. Распаковка
+          rm -rf output_raw && mkdir -p output_raw
           v2dat unpack geosite -o "$REPO_ROOT/output_raw" "$REPO_ROOT/source/_geosite.dat"
 
-          # 7. Обработка файлов
-          # Ищем все файлы, созданные v2dat (обычно они начинаются с geosite_)
+          # 6. Обработка файлов (Важно: маска теперь соответствует логам _geosite_*.txt)
           shopt -s nullglob
-          for f in "$REPO_ROOT/output_raw"/geosite_*; do
-            # Убираем префикс geosite_ и расширение .txt или любое другое
-            filename=$(basename "$f")
-            newname=$(echo "$filename" | sed 's/^geosite_//;s/\.[^.]*$//')
+          for f in "$REPO_ROOT/output_raw"/_geosite_*.txt; do
+            [ -e "$f" ] || continue
             
-            # Копируем в test/data/ только если файл не пустой
+            # Извлекаем чистое имя (из '_geosite_google.txt' делаем 'google')
+            # 1. basename уберет путь
+            # 2. первый sed уберет префикс _geosite_
+            # 3. второй sed уберет расширение .txt
+            newname=$(basename "$f" | sed 's/^_geosite_//;s/\.txt$//')
+            
             if [ -s "$f" ]; then
               cp "$f" "$REPO_ROOT/data/$newname"
             fi
           done
 
-          # 8. Фиксация изменений
-          git add "$REPO_ROOT/data/"
+          # 7. Фиксация изменений
+          git add data/
           
           if git diff --staged --quiet; then
-            echo "Изменений в папке data не обнаружено."
+            echo "Изменений в папке data не обнаружено. Проверьте маску файлов."
+            ls -la "$REPO_ROOT/output_raw" # Посмотрим что там на самом деле, если опять пусто
           else
-            git commit -m "Update geosite data: extracted from source/_geosite.dat"
+            git commit -m "Update geosite data: extracted and cleaned"
             git push origin main
           fi
