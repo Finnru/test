@@ -29,44 +29,53 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
-          # 2. Pull (защита от rejected)
+          # 2. Обновление ветки
           git pull origin main --rebase
 
-          # 3. Проверка наличия файла в папке source/
-          if [ ! -f "source/_geosite.dat" ]; then
+          # 3. Определяем абсолютный путь к корню репозитория
+          REPO_ROOT=$(pwd)
+          echo "Рабочая директория: $REPO_ROOT"
+
+          # 4. Проверка исходного файла (test/source/_geosite.dat)
+          if [ ! -f "$REPO_ROOT/source/_geosite.dat" ]; then
             echo "❌ Ошибка: Файл source/_geosite.dat не найден!"
+            ls -R # Выведем структуру для отладки, если упадет
             exit 1
           fi
 
-          # 4. Распаковка во временную папку
-          rm -rf output_raw && mkdir output_raw
-          v2dat unpack geosite -o output_raw source/_geosite.dat
-
-          # 5. Полная очистка папки data/ перед наполнением
-          rm -rf data && mkdir -p data
-
-          # 6. Обработка файлов и перенос в data/
-          if [ -d "output_raw" ]; then
-            cd output_raw
-            for f in geosite_*.txt; do
-              [ -e "$f" ] || continue
-              
-              # Убираем префикс geosite_ и расширение .txt
-              newname=$(basename "$f" | sed 's/^geosite_//;s/\.txt$//')
-              
-              # Копируем только непустые файлы в корень папки data
-              if [ -s "$f" ]; then
-                cp "$f" "../data/$newname"
-              fi
-            done
-            cd ..
+          # 5. Подготовка папок в корне репозитория
+          rm -rf "$REPO_ROOT/output_raw"
+          mkdir -p "$REPO_ROOT/output_raw"
+          
+          # Удаляем старую папку data и очищаем ее в Git
+          if [ -d "$REPO_ROOT/data" ]; then
+            git rm -rf "$REPO_ROOT/data" || rm -rf "$REPO_ROOT/data"
           fi
+          mkdir -p "$REPO_ROOT/data"
 
-          # 7. Коммит и отправка
-          git add data/
+          # 6. Распаковка
+          v2dat unpack geosite -o "$REPO_ROOT/output_raw" "$REPO_ROOT/source/_geosite.dat"
+
+          # 7. Обработка файлов
+          # Ищем все файлы, созданные v2dat (обычно они начинаются с geosite_)
+          shopt -s nullglob
+          for f in "$REPO_ROOT/output_raw"/geosite_*; do
+            # Убираем префикс geosite_ и расширение .txt или любое другое
+            filename=$(basename "$f")
+            newname=$(echo "$filename" | sed 's/^geosite_//;s/\.[^.]*$//')
+            
+            # Копируем в test/data/ только если файл не пустой
+            if [ -s "$f" ]; then
+              cp "$f" "$REPO_ROOT/data/$newname"
+            fi
+          done
+
+          # 8. Фиксация изменений
+          git add "$REPO_ROOT/data/"
+          
           if git diff --staged --quiet; then
-            echo "Изменений в data/ не обнаружено"
+            echo "Изменений в папке data не обнаружено."
           else
-            git commit -m "Unpack geosite 1:1 - clean names"
+            git commit -m "Update geosite data: extracted from source/_geosite.dat"
             git push origin main
           fi
