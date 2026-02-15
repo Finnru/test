@@ -1,7 +1,7 @@
 name: Unpack-GeoSite-Official-Final
 
 on:
-  workflow_dispatch: # Кнопка ручного запуска
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -29,31 +29,32 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
-          # 2. Pull изменений (защита от конфликтов)
+          # 2. Pull (защита от rejected)
           git pull origin main --rebase
 
-          # 3. Распаковка через v2dat напрямую из _geosite.dat
-          # Проверяем, существует ли исходный файл
-          if [ ! -f "_geosite.dat" ]; then
-            echo "❌ Ошибка: Файл _geosite.dat не найден в корне репозитория!"
+          # 3. Проверка наличия файла в папке source/
+          if [ ! -f "source/_geosite.dat" ]; then
+            echo "❌ Ошибка: Файл source/_geosite.dat не найден!"
             exit 1
           fi
 
+          # 4. Распаковка во временную папку
           rm -rf output_raw && mkdir output_raw
-          v2dat unpack geosite -o output_raw _geosite.dat
+          v2dat unpack geosite -o output_raw source/_geosite.dat
 
-          # 4. Очистка имен и перенос в папку data
+          # 5. Полная очистка папки data/ перед наполнением
           rm -rf data && mkdir -p data
-          
+
+          # 6. Обработка файлов и перенос в data/
           if [ -d "output_raw" ]; then
             cd output_raw
             for f in geosite_*.txt; do
               [ -e "$f" ] || continue
               
-              # Превращаем 'geosite_google.txt' в 'google'
-              newname=$(echo "$f" | sed 's/^geosite_//;s/\.txt$//')
+              # Убираем префикс geosite_ и расширение .txt
+              newname=$(basename "$f" | sed 's/^geosite_//;s/\.txt$//')
               
-              # Копируем только если файл не пустой
+              # Копируем только непустые файлы в корень папки data
               if [ -s "$f" ]; then
                 cp "$f" "../data/$newname"
               fi
@@ -61,11 +62,11 @@ jobs:
             cd ..
           fi
 
-          # 5. Коммит и отправка в репозиторий
+          # 7. Коммит и отправка
           git add data/
           if git diff --staged --quiet; then
-            echo "Нет изменений для коммита"
+            echo "Изменений в data/ не обнаружено"
           else
-            git commit -m "Unpack geosite from _geosite.dat - clean names"
+            git commit -m "Unpack geosite 1:1 - clean names"
             git push origin main
           fi
