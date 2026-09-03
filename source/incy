@@ -1,5 +1,38 @@
 {
   "dns": {
+    "servers": [
+      {
+        "tag": "feonet-dns",
+        "address": "udp://127.0.0.1:53",
+        "detour": "direct-out"
+      },
+      {
+        "tag": "direct-dns",
+        "address": "https://common.dot.dns.yandex.net/dns-query",
+        "detour": "direct-out"
+      },
+      {
+        "tag": "proxy-dns",
+        "address": "udp://1.1.1.1:53"
+      }
+    ],
+    "rules": [
+      {
+        "geosite": [
+          "bank-ru"
+        ],
+        "domain_suffix": [
+          "feonet.net"
+        ],
+        "server": "feonet-dns"
+      },
+      {
+        "geosite": [
+          "category-ru"
+        ],
+        "server": "direct-dns"
+      }
+    ],
     "hosts": {
       "common.dot.dns.yandex.net": "77.88.8.8",
       "one.one.one.one": "1.1.1.1",
@@ -7,106 +40,61 @@
       "wpad.lan": "127.0.0.1",
       "ntc.party": "130.255.77.28"
     },
-    "servers": [
-      {
-        "address": "127.0.0.1",
-        "port": 53,
-        "domains": [
-          "geosite:bank-ru",
-          "domain:feonet.net"
-        ],
-        "skipFallback": true,
-        "tag": "feonet-dns"
-      },
-      {
-        "address": "https://common.dot.dns.yandex.net/dns-query",
-        "port": 443,
-        "domains": [
-          "geosite:category-ru"
-        ],
-        "skipFallback": true,
-        "tag": "direct-dns"
-      },
-      {
-        "address": "1.1.1.1",
-        "port": 53,
-        "skipFallback": false,
-        "tag": "proxy-dns"
-      }
-    ],
-    "queryStrategy": "UseIPv4",
-    "nonIPQuery": "drop",
-    "disableCache": false,
-    "disableFallback": false,
-    "useSystemHosts": false,
-    "tag": "dns-module"
+    "strategy": "ipv4_only"
   },
-  "routing": {
-    "domainStrategy": "AsIs",
+  "route": {
+    "auto_detect_interface": true,
     "rules": [
       {
-        "type": "field",
-        "inboundTag": [
-          "dns-in"
+        "protocol": "dns",
+        "outbound": "dns-out"
+      },
+      {
+        "geosite": [
+          "win-spy"
         ],
-        "outboundTag": "dns-out"
+        "outbound": "block"
       },
       {
-        "type": "field",
-        "outboundTag": "blocked",
-        "network": "tcp,udp",
-        "domain": [
-          "geosite:win-spy"
-        ]
-      },
-      {
-        "type": "field",
-        "outboundTag": "direct-out",
-        "network": "tcp,udp",
         "domain": [
           "plist.link"
-        ]
+        ],
+        "outbound": "direct-out"
       },
       {
-        "type": "field",
-        "outboundTag": "proxy-out",
-        "network": "tcp,udp",
-        "domain": [
-          "geosite:force-proxy"
-        ]
+        "geosite": [
+          "force-proxy"
+        ],
+        "outbound": "proxy-out"
       },
       {
-        "type": "field",
-        "outboundTag": "direct-out",
-        "network": "tcp,udp",
-        "domain": [
-          "geosite:category-ru",
-          "geosite:microsoft",
-          "geosite:apple",
-          "geosite:games-direct",
-          "keyword:feonet",
-          "geosite:private"
-        ]
+        "geosite": [
+          "category-ru",
+          "microsoft",
+          "apple",
+          "games-direct",
+          "private"
+        ],
+        "domain_keyword": [
+          "feonet"
+        ],
+        "outbound": "direct-out"
       },
       {
-        "type": "field",
-        "outboundTag": "direct-out",
-        "network": "tcp,udp",
-        "ip": [
+        "ip_cidr": [
           "195.242.80.0/22",
           "185.179.144.0/22",
           "185.151.240.0/22",
           "31.131.255.0/24",
-          "151.101.0.0/16",
-          "geoip:ru",
-          "geoip:private"
-        ]
-      },
-      {
-        "type": "field",
-        "outboundTag": "proxy-out",
-        "network": "tcp,udp"
+          "151.101.0.0/16"
+        ],
+        "geoip": [
+          "ru",
+          "private"
+        ],
+        "outbound": "direct-out"
       }
-    ]
+    ],
+    "final": "proxy-out"
   }
 }
