@@ -16,14 +16,6 @@
 	  },
     "servers": [
 	   {
-		"address":"https://dns.adguard-dns.com/dns-query",
-		"port": 443,
-		"domains": [
-		"geosite:ads"],
-		"skipFallback": true,
-		"tag": "adguard-dns"
-	   },
-	   {
 		"address":"https://common.dot.dns.yandex.net/dns-query",
 		"port": 443,
 		"domains": ["geosite:category-ru"],
@@ -59,7 +51,8 @@
 		"outboundTag": "blocked",
 		"network": "tcp,udp",
 		"domain": [
-		"geosite:win-spy"]
+		"geosite:win-spy",
+		"geosite:ads"]
 	   },
 	   {
 		"type": "field",
