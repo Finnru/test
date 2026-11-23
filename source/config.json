@@ -1,1 +1,212 @@
-
+{
+  "log": {
+    "loglevel": "info",
+    "access": "none",
+    "error": "/tmp/xray_error.log"
+},
+  "dns": {
+    "hosts": {
+		"common.dot.dns.yandex.net": ["77.88.8.8"],
+		"dns.google": ["8.8.8.8","8.8.4.4"],
+		"one.one.one.one": ["1.1.1.1","1.0.0.1"],
+		"dns.adguard-dns.com": ["94.140.15.15","94.140.14.14"],
+		"wpad.lan": "127.0.0.1",
+		"openwrt.lan": "192.168.1.1",
+		"ntc.party": "130.255.77.28"
+	  },
+    "servers": [
+//	   {
+//		"address":"https://dns.adguard-dns.com/dns-query",
+//		"port": 443,
+//		"domains": [
+//		"geosite:ads"],
+//		"skipFallback": true,
+//		"tag": "adguard-dns"
+//	   },
+	   {
+		"address":"https://common.dot.dns.yandex.net/dns-query",
+		"port": 443,
+		"domains": ["geosite:category-ru"],
+//		"expectedIPs": "geoip:ru",
+		"skipFallback": true,
+		"tag": "direct-dns"
+	   },
+	   {
+		"address": "1.1.1.1",
+		"port": 53,
+		"skipFallback": false,
+		"tag": "proxy-dns"
+	   }
+  ],
+		"queryStrategy": "UseIPv4",
+		"nonIPQuery": "skip",
+		"queryCacheSize": 4096,
+		"disableCache": false,
+		"disableFallback": false,
+		"useSystemHosts": false,
+		"tag": "dns-module"
+	   },
+	"routing": {
+		"domainStrategy": "AsIs", 
+	"rules": [
+	   {
+		"type": "field",
+		"inboundTag": ["dns-in"],
+		"outboundTag": "dns-out"
+	   },
+	   {
+		"type": "field",
+		"outboundTag": "blocked",
+		"network": "tcp,udp",
+		"domain": [
+		"geosite:win-spy",
+		"geosite:ads"]
+	   },
+	   {
+		"type": "field",
+		"outboundTag": "proxy-out",
+		"network": "tcp,udp",
+		"domain": [
+		"geosite:force-proxy"]
+	   },
+	   {
+		"type": "field",
+		"outboundTag": "direct-out",
+		"network": "tcp,udp",
+		"domain": [
+//		"madeinchina.com",
+		"full:dns.google",
+		"time.windows.com",
+		"geosite:category-ru",
+		"geosite:microsoft",
+		"geosite:apple",
+		"geosite:games-direct",
+		"geosite:private"]
+	   },
+	   {
+		"type": "field",
+		"outboundTag": "direct-out",
+		"network": "tcp,udp",
+		"ip": [
+		"66.90.90.0/24",
+		"88.218.242.0/24",
+		"212.22.74.55",
+		"geoip:ru",
+		"geoip:private"]
+	   },
+	   {
+		"type": "field",
+		"outboundTag": "proxy-out",
+		"network": "tcp,udp"
+	   }
+    ]
+  },
+  "inbounds": [
+    {
+      "tag": "dns-in",
+      "port": 5333,
+      "protocol": "tunnel",
+      "settings": {"port": 53, "network": "tcp,udp","followRedirect": false}
+    },
+    {
+      "tag": "redirect-in",
+      "port": 5331,
+      "protocol": "tunnel",
+      "settings": {"network": "tcp","followRedirect": true},
+      "sniffing": {"enabled": true, 
+	  "destOverride": ["http","tls"],
+	  "metadataOnly": false,"routeOnly": true},
+	  "streamSettings": {"sockopt": {"tproxy": "redirect"}}
+    },
+    {
+      "tag": "tproxy-in",
+      "port": 5332,
+      "protocol": "tunnel",
+      "settings": {"network": "udp", "followRedirect": true},
+      "sniffing": {"enabled": false, 
+	  "destOverride": ["http","tls"],
+	  "metadataOnly": false,"routeOnly": true},
+	  "streamSettings": {"sockopt": {"tproxy": "tproxy"}}
+    }
+  ],
+"outbounds": [
+  {
+    "tag": "proxy-out",
+    "protocol": "vless",
+    "settings": {
+      "vnext": [
+        {
+          "address": "185.242.107.208",
+          "port": 443,
+          "users": [
+            {
+              "id": "",
+              "encryption": "none"
+            }
+          ]
+        }
+      ]
+    },
+    "streamSettings": {
+      "network": "xhttp",
+      "security": "reality",
+      "realitySettings": {
+        "serverName": "mirror.veesp.com",
+        "fingerprint": "firefox",
+        "show": false,
+        "publicKey": "",
+        "shortId": "",
+        "spiderX": "/"
+      },
+      "xhttpSettings": {
+        "host": "mirror.veesp.com",
+        "path": "/ubuntu/dists",
+        "mode": "auto",
+        "extra": {
+          "xPaddingBytes": "100-1000",
+          "scMaxEachPostBytes": "500000-1000000",
+          "scMinPostsIntervalMs": 30,
+          "xmux": {
+            "maxConcurrency": "16-32",
+            "maxConnections": 0,
+            "cMaxReuseTimes": "256-512",
+            "hMaxRequestTimes": "600-900",
+            "hMaxReusableSecs": "1800-3000",
+            "hKeepAlivePeriod": 0
+          }
+        }
+      },
+      "sockopt": {
+        "tcpFastOpen": false
+      }
+    }
+  },
+   	 {
+   	 	"tag": "blocked",
+   	 	"protocol": "blackhole",
+   	 	"settings": {"response": {"type": "http"}}
+   	 },
+   	 {
+   	 	"tag": "dns-out",
+   	 	"protocol": "dns"
+   	 },
+   	 {
+   	 	"tag": "direct-out",
+   	 	"protocol": "freedom",
+   	 	"settings": { "domainStrategy": "UseIPv4" },
+		"streamSettings": {
+        "sockopt": {
+        "noIPv6": false
+        }
+      }
+   	}
+  ],
+    "geodata": {
+    "cron": "52 11 * * *",
+    "outbound": "proxy-out",
+    "assets": [
+      { "url": "https://github.com/Finnru/geoip.dat/releases/download/latest/geoip.dat", "file": "geoip.dat" },
+      { "url": "https://github.com/Finnru/geosite.dat/releases/download/latest/geosite.dat", "file": "geosite.dat" }
+    ]
+  }
+}
