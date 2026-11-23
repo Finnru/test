@@ -74,7 +74,6 @@
 		"outboundTag": "direct-out",
 		"network": "tcp,udp",
 		"domain": [
-//		"madeinchina.com",
 		"full:dns.google",
 		"time.windows.com",
 		"geosite:category-ru",
