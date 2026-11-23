@@ -1,6 +1,6 @@
 {
   "log": {
-    "loglevel": "nome",
+    "loglevel": "none",
     "access": "none",
     "error": "/tmp/xray_error.log"
 },
