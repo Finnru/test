@@ -7,6 +7,7 @@
   "dns": {
     "hosts": {
 		"common.dot.dns.yandex.net": ["77.88.8.8"],
+		"comm.dot.dns.yandex.net": ["74.88.8.8"],
 		"dns.google": ["8.8.8.8","8.8.4.4"],
 		"one.one.one.one": ["1.1.1.1","1.0.0.1"],
 		"wpad.lan": "127.0.0.1",
