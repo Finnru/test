@@ -27,7 +27,7 @@
 		"address":"https://common.dot.dns.yandex.net/dns-query",
 		"port": 443,
 		"domains": ["geosite:category-ru"],
-//		"expectedIPs": "geoip:ru",
+		"expectedIPs": "geoip:ru",
 		"skipFallback": true,
 		"tag": "direct-dns"
 	   },
