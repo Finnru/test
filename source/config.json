@@ -183,11 +183,8 @@
    	 {
    	 	"tag": "direct-out",
    	 	"protocol": "freedom",
-   	 	"settings": { "domainStrategy": "UseIPv4" },
 		"streamSettings": {
-        "sockopt": {
-        "noIPv6": false
-        }
+        "sockopt": {"domainStrategy": "UseIPv4","noIPv6": false}
       }
    	}
   ],
